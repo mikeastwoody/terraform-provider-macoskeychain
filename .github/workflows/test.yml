@@ -1,4 +1,5 @@
-# Build, lint and test the provider on macOS, where it uses the real Keychain.
+# Build and lint the provider on Linux (it is pure Go without cgo) and test it
+# on macOS, where it uses the real Keychain.
 name: Tests
 
 on:
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   build:
     name: Build, vet and lint
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,6 +30,11 @@ jobs:
       - run: go mod download
       - run: go build -v .
       - run: go vet ./...
+      # Type-checks the darwin-only files as well.
+      - name: go vet for darwin
+        env:
+          GOOS: darwin
+        run: go vet ./...
       - name: Build without cgo for every release OS
         env:
           CGO_ENABLED: '0'
@@ -38,6 +44,12 @@ jobs:
           GOOS=windows GOARCH=amd64 go build ./...
       - name: Run linters
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+      - name: Run linters for darwin
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOOS: darwin
         with:
           version: v2.15.0
 
@@ -70,7 +82,8 @@ jobs:
   test:
     name: 'Tests: ${{ matrix.cli }} ${{ matrix.version }}'
     needs: build
-    runs-on: macos-latest
+    # The Intel image: macos-latest (arm64) runners could not be acquired.
+    runs-on: macos-15-intel
     timeout-minutes: 20
     strategy:
       fail-fast: false
