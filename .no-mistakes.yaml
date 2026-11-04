@@ -1,0 +1,23 @@
+# no-mistakes gate configuration.
+#
+# The daemon reads `commands` and `test.instructions` only from the default
+# branch (main), never from a pushed feature branch, so these settings take
+# effect once this file is on main.
+
+commands:
+  prepare: "go mod download"
+  # Unit tests, acceptance tests against OpenTofu and the real plan/apply proof.
+  # They only use throwaway keychains that stay unlocked, have no auto-lock and
+  # are outside the user's search list; locked, denied and canceled cases run
+  # against a fake `security`. None of them can show a macOS dialog.
+  test: "make testacc && make prove"
+
+test:
+  instructions: |
+    Run only `make testacc` and `make prove`. Do not improvise live keychain
+    scenarios. This machine is someone's desktop: a macOS dialog opens on their
+    screen. Never lock a keychain, never create items with `-T ""` or other
+    access-control experiments, never load launchd jobs, never call `security`
+    on a keychain you did not just create and unlock, and never touch the login
+    keychain or the user's keychain search list. Locked, denied, canceled and
+    no-GUI behaviour is covered by the unit tests with a fake `security`.
