@@ -13,37 +13,38 @@ import (
 )
 
 // Ensure provider defined types fully satisfy framework interfaces.
-var _ ephemeral.EphemeralResource = &PasswordEphemeralResource{}
-var _ ephemeral.EphemeralResourceWithValidateConfig = &PasswordEphemeralResource{}
+var _ ephemeral.EphemeralResource = &GenericPasswordEphemeralResource{}
+var _ ephemeral.EphemeralResourceWithValidateConfig = &GenericPasswordEphemeralResource{}
 
-// NewPasswordEphemeralResource returns the macoskeychain_password ephemeral
-// resource.
-func NewPasswordEphemeralResource() ephemeral.EphemeralResource {
-	return &PasswordEphemeralResource{}
+// NewGenericPasswordEphemeralResource returns the
+// macoskeychain_generic_password ephemeral resource.
+func NewGenericPasswordEphemeralResource() ephemeral.EphemeralResource {
+	return &GenericPasswordEphemeralResource{}
 }
 
-// PasswordEphemeralResource reads a generic password item.
-type PasswordEphemeralResource struct{}
+// GenericPasswordEphemeralResource reads a generic password item.
+type GenericPasswordEphemeralResource struct{}
 
-// PasswordEphemeralResourceModel describes the ephemeral resource data model.
-type PasswordEphemeralResourceModel struct {
+// GenericPasswordEphemeralResourceModel describes the ephemeral resource data
+// model.
+type GenericPasswordEphemeralResourceModel struct {
 	Service  types.String `tfsdk:"service"`
 	Account  types.String `tfsdk:"account"`
 	Keychain types.String `tfsdk:"keychain"`
 	Password types.String `tfsdk:"password"`
 }
 
-func (m PasswordEphemeralResourceModel) lookup() lookupConfig {
+func (m GenericPasswordEphemeralResourceModel) lookup() lookupConfig {
 	return lookupConfig{Primary: m.Service, Account: m.Account, Keychain: m.Keychain}
 }
 
 // Metadata returns the ephemeral resource type name.
-func (r *PasswordEphemeralResource) Metadata(_ context.Context, req ephemeral.MetadataRequest, resp *ephemeral.MetadataResponse) {
-	resp.TypeName = req.ProviderTypeName + "_password"
+func (r *GenericPasswordEphemeralResource) Metadata(_ context.Context, req ephemeral.MetadataRequest, resp *ephemeral.MetadataResponse) {
+	resp.TypeName = req.ProviderTypeName + "_generic_password"
 }
 
 // Schema returns the ephemeral resource schema.
-func (r *PasswordEphemeralResource) Schema(_ context.Context, _ ephemeral.SchemaRequest, resp *ephemeral.SchemaResponse) {
+func (r *GenericPasswordEphemeralResource) Schema(_ context.Context, _ ephemeral.SchemaRequest, resp *ephemeral.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Reads the password of a generic password item from the macOS Keychain, " +
 			"the kind of item that `security add-generic-password` and Keychain Access create. " +
@@ -74,8 +75,8 @@ func (r *PasswordEphemeralResource) Schema(_ context.Context, _ ephemeral.Schema
 }
 
 // ValidateConfig checks the lookup attributes before the resource is opened.
-func (r *PasswordEphemeralResource) ValidateConfig(ctx context.Context, req ephemeral.ValidateConfigRequest, resp *ephemeral.ValidateConfigResponse) {
-	var data PasswordEphemeralResourceModel
+func (r *GenericPasswordEphemeralResource) ValidateConfig(ctx context.Context, req ephemeral.ValidateConfigRequest, resp *ephemeral.ValidateConfigResponse) {
+	var data GenericPasswordEphemeralResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -84,8 +85,8 @@ func (r *PasswordEphemeralResource) ValidateConfig(ctx context.Context, req ephe
 }
 
 // Open reads the password from the Keychain.
-func (r *PasswordEphemeralResource) Open(ctx context.Context, req ephemeral.OpenRequest, resp *ephemeral.OpenResponse) {
-	var data PasswordEphemeralResourceModel
+func (r *GenericPasswordEphemeralResource) Open(ctx context.Context, req ephemeral.OpenRequest, resp *ephemeral.OpenResponse) {
+	var data GenericPasswordEphemeralResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
 	if resp.Diagnostics.HasError() {
 		return

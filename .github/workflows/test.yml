@@ -29,9 +29,11 @@ jobs:
       - run: go mod download
       - run: go build -v .
       - run: go vet ./...
-      - name: Build for the other platforms (no cgo)
+      - name: Build without cgo for every release OS
+        env:
+          CGO_ENABLED: '0'
         run: |
-          CGO_ENABLED=0 go build ./...
+          GOOS=darwin GOARCH=arm64 go build ./...
           GOOS=linux GOARCH=amd64 go build ./...
           GOOS=windows GOARCH=amd64 go build ./...
       - name: Run linters
@@ -109,8 +111,6 @@ jobs:
           TF_ACC_TERRAFORM_PATH="$(command -v "$CLI")"
           export TF_ACC_TERRAFORM_PATH
           go test -v -cover -timeout 15m ./...
-      - name: Tests of the build without cgo
-        run: CGO_ENABLED=0 go test -v ./internal/keychain/
       - name: Prove that no secret reaches the plan or the state
         env:
           TOFU: ${{ matrix.cli }}

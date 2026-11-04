@@ -3,7 +3,7 @@
 name: Release
 
 # Creates a draft release when a tag that matches "v*" (e.g. v0.1.0) is
-# pushed. The darwin builds need cgo and the macOS SDK, so this runs on macOS.
+# pushed. Every build is pure Go (CGO_ENABLED=0), so this runs on Linux.
 on:
   push:
     tags:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

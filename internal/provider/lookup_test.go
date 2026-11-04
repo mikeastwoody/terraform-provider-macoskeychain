@@ -28,17 +28,17 @@ func TestExplain(t *testing.T) {
 	}{
 		"not found": {
 			spec: genericPasswordSpec, q: q,
-			err:         &keychain.Error{Code: keychain.CodeNotFound, Status: -25300, Message: "The specified item could not be found in the keychain."},
+			err:         &keychain.Error{Code: keychain.CodeNotFound, ExitStatus: 44},
 			wantSummary: "Keychain item not found",
 			wantDetail: []string{
 				`No generic password item with service "my service" and account "alice" exists in the keychain "/tmp/ci.keychain-db"`,
 				"security find-generic-password -s 'my service' -a alice /tmp/ci.keychain-db",
-				"OSStatus -25300",
+				"security exited with status 44",
 			},
 		},
 		"not found in search list": {
 			spec: internetPasswordSpec, q: keychain.Query{Kind: keychain.InternetPassword, Service: "example.com", Account: "bob"},
-			err:         &keychain.Error{Code: keychain.CodeNotFound, Status: -25300},
+			err:         &keychain.Error{Code: keychain.CodeNotFound, ExitStatus: 44},
 			wantSummary: "Keychain item not found",
 			wantDetail: []string{
 				`No internet password item with server "example.com" and account "bob" exists in the user's keychain search list`,
@@ -51,29 +51,23 @@ func TestExplain(t *testing.T) {
 			wantSummary: "Keychain file not found",
 			wantDetail:  []string{`"/tmp/ci.keychain-db" does not exist`},
 		},
-		"locked": {
+		"locked or interaction not allowed": {
 			spec: genericPasswordSpec, q: q,
-			err:         &keychain.Error{Code: keychain.CodeLocked, Status: -25293},
-			wantSummary: "Keychain is locked",
-			wantDetail:  []string{"security unlock-keychain /tmp/ci.keychain-db"},
+			err:         &keychain.Error{Code: keychain.CodeInteractionNotAllowed, ExitStatus: 36},
+			wantSummary: "Keychain is locked or needs confirmation",
+			wantDetail:  []string{"SSH", "security unlock-keychain /tmp/ci.keychain-db", "Always Allow"},
 		},
 		"access denied": {
 			spec: genericPasswordSpec, q: q,
-			err:         &keychain.Error{Code: keychain.CodeAccessDenied, Status: -25293},
+			err:         &keychain.Error{Code: keychain.CodeAccessDenied, ExitStatus: 51},
 			wantSummary: "Access to the keychain item denied",
-			wantDetail:  []string{"access control", "Always Allow"},
-		},
-		"interaction not allowed": {
-			spec: genericPasswordSpec, q: q,
-			err:         &keychain.Error{Code: keychain.CodeInteractionNotAllowed, Status: -25308},
-			wantSummary: "Keychain needs user interaction",
-			wantDetail:  []string{"SSH"},
+			wantDetail:  []string{"refused to let /usr/bin/security read", "status 51"},
 		},
 		"canceled": {
 			spec: genericPasswordSpec, q: q,
-			err:         &keychain.Error{Code: keychain.CodeCanceled, Status: -128},
-			wantSummary: "Access to the keychain item denied",
-			wantDetail:  []string{"denied in the macOS dialog"},
+			err:         &keychain.Error{Code: keychain.CodeCanceled, ExitStatus: 128},
+			wantSummary: "Access to the keychain item canceled",
+			wantDetail:  []string{"dialog for the generic password item", "was canceled"},
 		},
 		"invalid data": {
 			spec: genericPasswordSpec, q: q,
@@ -83,9 +77,9 @@ func TestExplain(t *testing.T) {
 		},
 		"other": {
 			spec: genericPasswordSpec, q: q,
-			err:         &keychain.Error{Code: keychain.CodeOther, Status: -50, Message: "One or more parameters passed to a function were not valid."},
+			err:         &keychain.Error{Code: keychain.CodeOther, ExitStatus: 206},
 			wantSummary: "Keychain error",
-			wantDetail:  []string{"OSStatus -50"},
+			wantDetail:  []string{"security exited with status 206"},
 		},
 		"unsupported platform": {
 			spec: genericPasswordSpec, q: q,

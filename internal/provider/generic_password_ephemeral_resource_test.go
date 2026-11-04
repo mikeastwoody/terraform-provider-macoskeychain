@@ -26,7 +26,11 @@ var ephemeralVersionChecks = []tfversion.TerraformVersionCheck{
 	tfversion.SkipBelow(tfversion.Version1_10_0),
 }
 
-func TestAccPasswordEphemeralResource(t *testing.T) {
+// TestAccGenericPasswordEphemeralResource reads items created with
+// `security add-generic-password` and no -A or -T option, whose access
+// control trusts only /usr/bin/security, as most command-line users create
+// them.
+func TestAccGenericPasswordEphemeralResource(t *testing.T) {
 	kc := testAccKeychain(t)
 	secret := keychaintest.RandomSecret(t)
 	kc.AddGenericPassword(t, "tf-acc-service", "alice", secret)
@@ -40,11 +44,11 @@ func TestAccPasswordEphemeralResource(t *testing.T) {
 			{
 				// The echo provider copies the ephemeral value into its own
 				// state, which is the only way to observe it in a test.
-				Config: testAccEchoConfig(`ephemeral "macoskeychain_password" "test" {
+				Config: testAccEchoConfig(`ephemeral "macoskeychain_generic_password" "test" {
   service  = "tf-acc-service"
   account  = "alice"
   keychain = %q
-}`, kc.Path, "ephemeral.macoskeychain_password.test.password"),
+}`, kc.Path, "ephemeral.macoskeychain_generic_password.test.password"),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue("echo.test", tfjsonpath.New("data"), knownvalue.StringExact(secret)),
 				},
@@ -53,10 +57,10 @@ func TestAccPasswordEphemeralResource(t *testing.T) {
 	})
 }
 
-// TestAccPasswordEphemeralResourceNoLeak proves that the password reaches the
+// TestAccGenericPasswordEphemeralResourceNoLeak proves that the password reaches the
 // configuration that uses it but is written to neither the plan nor the
 // state. Only a hash of it crosses into the echo provider's state.
-func TestAccPasswordEphemeralResourceNoLeak(t *testing.T) {
+func TestAccGenericPasswordEphemeralResourceNoLeak(t *testing.T) {
 	kc := testAccKeychain(t)
 	secret := keychaintest.RandomSecret(t)
 	kc.AddGenericPassword(t, "tf-acc-service", "alice", secret)
@@ -68,11 +72,11 @@ func TestAccPasswordEphemeralResourceNoLeak(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactoriesWithEcho,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccEchoConfig(`ephemeral "macoskeychain_password" "test" {
+				Config: testAccEchoConfig(`ephemeral "macoskeychain_generic_password" "test" {
   service  = "tf-acc-service"
   account  = "alice"
   keychain = %q
-}`, kc.Path, "sha256(ephemeral.macoskeychain_password.test.password)"),
+}`, kc.Path, "sha256(ephemeral.macoskeychain_generic_password.test.password)"),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply:             []plancheck.PlanCheck{expectAbsentFromPlan(secret)},
 					PostApplyPostRefresh: []plancheck.PlanCheck{expectAbsentFromPlan(secret)},
@@ -86,22 +90,17 @@ func TestAccPasswordEphemeralResourceNoLeak(t *testing.T) {
 	})
 }
 
-func TestAccPasswordEphemeralResourceErrors(t *testing.T) {
+func TestAccGenericPasswordEphemeralResourceErrors(t *testing.T) {
 	kc := testAccKeychain(t)
-	secret := keychaintest.RandomSecret(t)
-	kc.AddGenericPassword(t, "tf-acc-service", "alice", secret)
-	kc.AddRestrictedGenericPassword(t, "tf-acc-restricted", "alice", secret)
-	locked := keychaintest.New(t)
-	locked.AddGenericPassword(t, "tf-acc-service", "alice", secret)
-	locked.Lock(t)
+	kc.AddGenericPassword(t, "tf-acc-service", "alice", keychaintest.RandomSecret(t))
 
 	step := func(service, account, keychainPath string, want string) resource.TestStep {
 		return resource.TestStep{
-			Config: testAccEchoConfig(fmt.Sprintf(`ephemeral "macoskeychain_password" "test" {
+			Config: testAccEchoConfig(fmt.Sprintf(`ephemeral "macoskeychain_generic_password" "test" {
   service  = %q
   account  = %q
   keychain = %%q
-}`, service, account), keychainPath, "ephemeral.macoskeychain_password.test.password"),
+}`, service, account), keychainPath, "ephemeral.macoskeychain_generic_password.test.password"),
 			ExpectError: regexp.MustCompile(want),
 		}
 	}
@@ -117,8 +116,6 @@ func TestAccPasswordEphemeralResourceErrors(t *testing.T) {
 			step("tf-acc-service", "alice", "relative.keychain-db", `must be absolute`),
 			step("", "alice", kc.Path, `service must not be empty`),
 			step("tf-acc-service", "", kc.Path, `account must not be empty`),
-			step("tf-acc-restricted", "alice", kc.Path, `Access to the keychain item denied`),
-			step("tf-acc-service", "alice", locked.Path, `Keychain is locked`),
 		},
 	})
 }

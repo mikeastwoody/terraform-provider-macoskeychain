@@ -3,19 +3,19 @@
 #
 #   security add-generic-password -s sentry-auth-token -a deploy -w
 
-ephemeral "macoskeychain_password" "sentry" {
+ephemeral "macoskeychain_generic_password" "sentry" {
   service = "sentry-auth-token"
   account = "deploy"
 }
 
 # Provider configurations accept ephemeral values.
 provider "sentry" {
-  token = ephemeral.macoskeychain_password.sentry.password
+  token = ephemeral.macoskeychain_generic_password.sentry.password
 }
 
 # So do write-only arguments, which are never stored either. This item lives in
 # a separate keychain file instead of the default search list.
-ephemeral "macoskeychain_password" "database" {
+ephemeral "macoskeychain_generic_password" "database" {
   service  = "app-database-password"
   account  = "app"
   keychain = pathexpand("~/Library/Keychains/infra.keychain-db")
@@ -23,6 +23,6 @@ ephemeral "macoskeychain_password" "database" {
 
 resource "google_secret_manager_secret_version" "database" {
   secret                 = google_secret_manager_secret.database.id
-  secret_data_wo         = ephemeral.macoskeychain_password.database.password
+  secret_data_wo         = ephemeral.macoskeychain_generic_password.database.password
   secret_data_wo_version = 1
 }

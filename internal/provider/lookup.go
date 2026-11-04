@@ -96,7 +96,7 @@ func (s itemSpec) read(ctx context.Context, c lookupConfig) (types.String, diag.
 		"keychain": q.Keychain,
 	})
 
-	password, err := keychain.FindPassword(q)
+	password, err := keychain.FindPassword(ctx, q)
 	if err != nil {
 		summary, detail := s.explain(q, err)
 		diags.AddError(summary, detail)
@@ -134,24 +134,17 @@ func (s itemSpec) explain(q keychain.Query, err error) (summary, detail string) 
 	case keychain.CodeKeychainNotFound:
 		summary = "Keychain file not found"
 		detail = fmt.Sprintf("The keychain file %q does not exist or is not a file.", q.Keychain)
-	case keychain.CodeLocked:
-		summary = "Keychain is locked"
-		detail = fmt.Sprintf("The keychain that holds the %s is locked, and macOS could not ask for its password in this session. Unlock it first, for example with `security unlock-keychain%s`, then run the command again.",
+	case keychain.CodeInteractionNotAllowed:
+		summary = "Keychain is locked or needs confirmation"
+		detail = fmt.Sprintf("Reading the %s needs a macOS dialog, to unlock the keychain or to confirm access to the item, but this session cannot show one, for example because it is an SSH session. Unlock the keychain first with `security unlock-keychain%s` and run the command again. If the keychain is already unlocked, the item's access control does not trust /usr/bin/security: read it once from a logged-in desktop session and choose Always Allow.",
 			item, keychainArg)
 	case keychain.CodeAccessDenied:
 		summary = "Access to the keychain item denied"
-		detail = fmt.Sprintf("The %s exists in %s, but its access control does not let this provider read it, and macOS could not ask for confirmation. Run OpenTofu from a logged-in desktop session and choose Allow or Always Allow when macOS asks, or change the item's access control as the provider documentation explains.",
+		detail = fmt.Sprintf("macOS refused to let /usr/bin/security read the %s in %s, for example because access was denied or a wrong keychain password was entered in a macOS dialog.",
 			item, location)
-		if q.Keychain == "" {
-			detail += " If the item is not in your default keychain, the keychain that holds it may instead be locked."
-		}
-	case keychain.CodeInteractionNotAllowed:
-		summary = "Keychain needs user interaction"
-		detail = fmt.Sprintf("Reading the %s needs a macOS dialog (to unlock the keychain or to confirm access), but this session cannot show one, for example because it is an SSH session. Unlock the keychain with `security unlock-keychain%s` first, or run OpenTofu from a logged-in desktop session.",
-			item, keychainArg)
 	case keychain.CodeCanceled:
-		summary = "Access to the keychain item denied"
-		detail = fmt.Sprintf("Access to the %s was denied in the macOS dialog.", item)
+		summary = "Access to the keychain item canceled"
+		detail = fmt.Sprintf("The macOS dialog for the %s was canceled.", item)
 	case keychain.CodeInvalidData:
 		summary = "Keychain item is not text"
 		detail = fmt.Sprintf("The password of the %s is not valid UTF-8 text, so the provider cannot return it as a string.", item)

@@ -30,7 +30,7 @@ variable "proof_file" {
   type        = string
 }
 
-ephemeral "macoskeychain_password" "demo" {
+ephemeral "macoskeychain_generic_password" "demo" {
   service  = var.service
   account  = var.account
   keychain = var.keychain
@@ -44,7 +44,7 @@ resource "terraform_data" "consumer" {
   provisioner "local-exec" {
     command = "printf '%s' \"$SECRET\" | shasum -a 256 > \"$PROOF_FILE\""
     environment = {
-      SECRET     = ephemeral.macoskeychain_password.demo.password
+      SECRET     = ephemeral.macoskeychain_generic_password.demo.password
       PROOF_FILE = var.proof_file
     }
   }

@@ -16,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/echoprovider"
-	"github.com/mikeastwoody/terraform-provider-macoskeychain/internal/keychain"
 	"github.com/mikeastwoody/terraform-provider-macoskeychain/internal/keychaintest"
 )
 
@@ -26,13 +25,6 @@ import (
 var testAccProtoV6ProviderFactoriesWithEcho = map[string]func() (tfprotov6.ProviderServer, error){
 	"macoskeychain": providerserver.NewProtocol6WithError(New("test")()),
 	"echo":          echoprovider.NewProviderServer(),
-}
-
-func TestMain(m *testing.M) {
-	// Acceptance tests serve the provider in this process. A misconfigured
-	// test must fail rather than wait on a macOS dialog.
-	keychain.SetUserInteractionAllowed(false)
-	os.Exit(m.Run())
 }
 
 func testAccPreCheck(t *testing.T) {
@@ -110,7 +102,7 @@ func TestProviderExposesOnlyEphemeralResources(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"macoskeychain_internet_password", "macoskeychain_password"}
+	want := []string{"macoskeychain_generic_password", "macoskeychain_internet_password"}
 	if len(names) != len(want) || names[0] != want[0] || names[1] != want[1] {
 		t.Fatalf("ephemeral resources = %v, want %v", names, want)
 	}

@@ -1,36 +1,49 @@
 // Copyright (c) 2026 mikeastwood
 // SPDX-License-Identifier: MPL-2.0
 
-// Package keychain reads password items from the macOS Keychain through the
-// Security framework. It only reads: it never creates, changes or deletes
-// keychain items.
+// Package keychain reads password items from the macOS Keychain by running
+// /usr/bin/security, the same tool that `security add-generic-password`
+// stores items with. Items created that way trust /usr/bin/security, so
+// reading them never shows a macOS dialog. It only reads: it never creates,
+// changes or deletes keychain items.
 //
-// Nothing in this package logs, formats or returns secret material in an
-// error. Errors carry the lookup attributes (service or server, account and
-// keychain path), which are configuration rather than secrets, and the
-// Security framework's own status code and description.
+// The password travels from the security child process to this package only
+// through a pipe. It is never on a command line or in an environment, and
+// nothing in this package logs, formats or returns it in an error. Errors
+// carry a classification and security's exit status, never the text that
+// security printed.
 package keychain
 
 import (
+	"bytes"
+	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 )
+
+// securityPath is the only program this package runs. It is an absolute
+// path, so PATH is never searched.
+const securityPath = "/usr/bin/security"
 
 // Kind selects the keychain item class to search.
 type Kind int
 
 const (
-	// GenericPassword matches generic password items (kSecClassGenericPassword),
-	// identified by service and account. This is the class that
-	// `security add-generic-password` creates.
+	// GenericPassword matches generic password items, identified by service
+	// and account. This is the class that `security add-generic-password`
+	// creates.
 	GenericPassword Kind = iota
 
-	// InternetPassword matches internet password items (kSecClassInternetPassword),
-	// identified by server and account. This is the class that
-	// `security add-internet-password` creates.
+	// InternetPassword matches internet password items, identified by server
+	// and account. This is the class that `security add-internet-password`
+	// creates.
 	InternetPassword
 )
 
@@ -85,6 +98,20 @@ func (q Query) primaryName() string {
 	return "service"
 }
 
+// args returns the security command line that prints the item's password
+// to standard error.
+func (q Query) args() []string {
+	command := "find-generic-password"
+	if q.Kind == InternetPassword {
+		command = "find-internet-password"
+	}
+	args := []string{command, "-s", q.Service, "-a", q.Account, "-g"}
+	if q.Keychain != "" {
+		args = append(args, q.Keychain)
+	}
+	return args
+}
+
 // ValidateAttribute reports whether value is usable as the named lookup
 // attribute: non-empty, valid UTF-8 and free of NUL bytes.
 func ValidateAttribute(name, value string) error {
@@ -116,9 +143,113 @@ func ValidateKeychainPath(path string) error {
 	return nil
 }
 
-// ErrUnsupportedPlatform is returned on every platform where the provider
-// cannot reach the macOS Security framework.
+// ErrUnsupportedPlatform is returned on every platform other than macOS.
 var ErrUnsupportedPlatform = errors.New("the macOS Keychain is not available on this platform")
+
+// FindPassword returns the password of the first item that matches q. It
+// returns an *Error for keychain failures and a plain error for an invalid
+// query or an unsupported platform.
+func FindPassword(ctx context.Context, q Query) (string, error) {
+	if err := q.Validate(); err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "darwin" {
+		return "", fmt.Errorf("%w: the provider is running on %s/%s, and it can only read the Keychain on macOS",
+			ErrUnsupportedPlatform, runtime.GOOS, runtime.GOARCH)
+	}
+	return findPassword(ctx, securityPath, q)
+}
+
+// findPassword runs the security program at path for q, which must be valid.
+func findPassword(ctx context.Context, path string, q Query) (string, error) {
+	if q.Keychain != "" {
+		// security reports a missing keychain file as a missing item, so
+		// check the file first to say what is actually wrong.
+		info, err := os.Stat(q.Keychain)
+		switch {
+		case os.IsNotExist(err):
+			return "", &Error{Code: CodeKeychainNotFound}
+		case err != nil:
+			return "", &Error{Code: CodeOther, Message: err.Error()}
+		case info.IsDir():
+			return "", &Error{Code: CodeKeychainNotFound, Message: "the path is a directory"}
+		}
+	}
+
+	// With -g, security prints the item's attributes to standard output,
+	// which is discarded, and the password to standard error.
+	var stderr bytes.Buffer
+	stderr.Grow(4096)
+	defer func() { clear(stderr.Bytes()) }()
+	cmd := exec.CommandContext(ctx, path, q.args()...)
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", &Error{Code: CodeOther, Message: ctxErr.Error()}
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			status := exitErr.ExitCode()
+			return "", &Error{Code: classify(status), ExitStatus: status}
+		}
+		return "", &Error{Code: CodeOther, Message: err.Error()}
+	}
+
+	password, err := decodePassword(stderr.Bytes())
+	if err != nil {
+		return "", &Error{Code: CodeOther, Message: err.Error()}
+	}
+	defer clear(password)
+	if !utf8.Valid(password) {
+		return "", &Error{Code: CodeInvalidData}
+	}
+	return string(password), nil
+}
+
+// decodePassword extracts the password from what `security find-*-password
+// -g` writes to standard error: one line made of "password: " and then
+// nothing for an empty password, the password in double quotes when it is
+// printable ASCII other than a backslash, or "0x", the password's bytes in
+// hexadecimal, and a quoted rendering that is ignored. The returned slice
+// does not share memory with out. Errors never include out.
+func decodePassword(out []byte) ([]byte, error) {
+	errUnexpected := errors.New("unexpected output from security")
+	line, ok := bytes.CutSuffix(out, []byte("\n"))
+	if !ok || bytes.IndexByte(line, '\n') >= 0 {
+		return nil, errUnexpected
+	}
+	rest, ok := bytes.CutPrefix(line, []byte("password: "))
+	if !ok {
+		return nil, errUnexpected
+	}
+
+	if len(rest) == 0 {
+		return []byte{}, nil
+	}
+	if quoted, ok := bytes.CutPrefix(rest, []byte(`"`)); ok {
+		text, ok := bytes.CutSuffix(quoted, []byte(`"`))
+		if !ok {
+			return nil, errUnexpected
+		}
+		return bytes.Clone(text), nil
+	}
+	digits, ok := bytes.CutPrefix(rest, []byte("0x"))
+	if !ok {
+		return nil, errUnexpected
+	}
+	if end := bytes.IndexByte(digits, ' '); end >= 0 {
+		digits = digits[:end]
+	}
+	if len(digits) == 0 || len(digits)%2 != 0 {
+		return nil, errUnexpected
+	}
+	data := make([]byte, hex.DecodedLen(len(digits)))
+	if _, err := hex.Decode(data, digits); err != nil {
+		clear(data)
+		return nil, errUnexpected
+	}
+	return data, nil
+}
 
 // Code classifies a keychain failure so callers can explain it.
 type Code int
@@ -133,20 +264,17 @@ const (
 	// CodeKeychainNotFound means the keychain file in Query.Keychain does not exist.
 	CodeKeychainNotFound
 
-	// CodeLocked means the keychain is locked and could not be unlocked
-	// without user interaction.
-	CodeLocked
-
-	// CodeAccessDenied means the item exists but its access control does not
-	// let this program read it without a confirmation that could not be shown.
-	CodeAccessDenied
-
-	// CodeInteractionNotAllowed means macOS needed to show a dialog (unlock
-	// or access confirmation) but the session does not allow it, for example
-	// over SSH.
+	// CodeInteractionNotAllowed means macOS needed to show a dialog, to
+	// unlock the keychain or to confirm access to the item, but the session
+	// does not allow it, for example over SSH.
 	CodeInteractionNotAllowed
 
-	// CodeCanceled means the user denied access in a macOS dialog.
+	// CodeAccessDenied means macOS refused access to the item, for example
+	// because access was denied or a wrong keychain password was entered in
+	// a macOS dialog.
+	CodeAccessDenied
+
+	// CodeCanceled means a macOS dialog for the item was canceled.
 	CodeCanceled
 
 	// CodeInvalidData means the item's data is not valid UTF-8 text.
@@ -158,12 +286,12 @@ type Error struct {
 	// Code classifies the failure.
 	Code Code
 
-	// Status is the Security framework OSStatus, or 0 when the failure was
-	// detected before calling the framework.
-	Status int32
+	// ExitStatus is the exit status of security when it exited with an
+	// error, and 0 otherwise.
+	ExitStatus int
 
-	// Message is the Security framework's description of Status, or a short
-	// explanation when Status is 0. It may be empty.
+	// Message is a short explanation of a failure that has no exit status.
+	// It never comes from security's output, and it may be empty.
 	Message string
 }
 
@@ -172,10 +300,8 @@ func (e *Error) Error() string {
 	var b strings.Builder
 	b.WriteString(e.Code.describe())
 	switch {
-	case e.Status != 0 && e.Message != "":
-		fmt.Fprintf(&b, " (OSStatus %d: %s)", e.Status, e.Message)
-	case e.Status != 0:
-		fmt.Fprintf(&b, " (OSStatus %d)", e.Status)
+	case e.ExitStatus != 0:
+		fmt.Fprintf(&b, " (security exited with status %d)", e.ExitStatus)
 	case e.Message != "":
 		fmt.Fprintf(&b, " (%s)", e.Message)
 	}
@@ -188,14 +314,12 @@ func (c Code) describe() string {
 		return "item not found"
 	case CodeKeychainNotFound:
 		return "keychain file not found"
-	case CodeLocked:
-		return "keychain is locked"
-	case CodeAccessDenied:
-		return "access to the item was denied"
 	case CodeInteractionNotAllowed:
 		return "user interaction is not allowed in this session"
+	case CodeAccessDenied:
+		return "access to the item was denied"
 	case CodeCanceled:
-		return "access was denied in the macOS dialog"
+		return "the macOS dialog was canceled"
 	case CodeInvalidData:
 		return "item data is not valid UTF-8 text"
 	default:
@@ -203,41 +327,27 @@ func (c Code) describe() string {
 	}
 }
 
-// Security framework status codes this package interprets. Values are from
-// <Security/SecBase.h> and <MacTypes.h>; they are duplicated here so that
-// classification is testable on every platform.
+// security exits with the low byte of the Security framework's OSStatus.
+// These are the statuses this package interprets, from <Security/SecBase.h>
+// and <MacTypes.h>.
 const (
-	statusUserCanceled          = -128   // userCanceledErr
-	statusAuthFailed            = -25293 // errSecAuthFailed
-	statusNoSuchKeychain        = -25294 // errSecNoSuchKeychain
-	statusItemNotFound          = -25300 // errSecItemNotFound
-	statusInteractionNotAllowed = -25308 // errSecInteractionNotAllowed
-	statusInteractionRequired   = -25315 // errSecInteractionRequired
+	exitItemNotFound          = 44  // errSecItemNotFound, -25300
+	exitAuthFailed            = 51  // errSecAuthFailed, -25293
+	exitInteractionNotAllowed = 36  // errSecInteractionNotAllowed, -25308
+	exitUserCanceled          = 128 // userCanceledErr, -128
 )
 
-// classify maps a Security framework status to a Code. locked reports whether
-// the keychain that was searched is known to be locked at the time of the
-// failure; it disambiguates errSecAuthFailed, which the framework returns
-// both for a locked keychain and for an access-control refusal when it may
-// not show a dialog.
-func classify(status int32, locked bool) Code {
+// classify maps an exit status of security to a Code.
+func classify(status int) Code {
 	switch status {
-	case statusItemNotFound:
+	case exitItemNotFound:
 		return CodeNotFound
-	case statusNoSuchKeychain:
-		return CodeKeychainNotFound
-	case statusUserCanceled:
-		return CodeCanceled
-	case statusInteractionNotAllowed, statusInteractionRequired:
-		if locked {
-			return CodeLocked
-		}
+	case exitInteractionNotAllowed:
 		return CodeInteractionNotAllowed
-	case statusAuthFailed:
-		if locked {
-			return CodeLocked
-		}
+	case exitAuthFailed:
 		return CodeAccessDenied
+	case exitUserCanceled:
+		return CodeCanceled
 	default:
 		return CodeOther
 	}

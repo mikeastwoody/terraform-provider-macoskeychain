@@ -59,8 +59,9 @@ fi
 secret="proof-$(random_hex 40)"
 service="macoskeychain-proof"
 account="proof-$(random_hex 8)"
-# -A lets the freshly built provider read the item without a macOS dialog.
-security_stdin "add-generic-password -A -s \"$service\" -a \"$account\" -w \"$secret\" \"$keychain\""
+# No -A or -T: like most command-line items, it trusts only /usr/bin/security,
+# which is what the provider runs to read it.
+security_stdin "add-generic-password -s \"$service\" -a \"$account\" -w \"$secret\" \"$keychain\""
 expected_sha=$(printf '%s' "$secret" | shasum -a 256 | cut -d ' ' -f 1)
 echo "   stored a ${#secret}-character password with SHA-256 ${expected_sha:0:12}..."
 

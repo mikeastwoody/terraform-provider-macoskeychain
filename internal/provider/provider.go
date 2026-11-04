@@ -63,7 +63,7 @@ func (p *MacOSKeychainProvider) DataSources(_ context.Context) []func() datasour
 // EphemeralResources returns the provider's ephemeral resources.
 func (p *MacOSKeychainProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
 	return []func() ephemeral.EphemeralResource{
-		NewPasswordEphemeralResource,
+		NewGenericPasswordEphemeralResource,
 		NewInternetPasswordEphemeralResource,
 	}
 }

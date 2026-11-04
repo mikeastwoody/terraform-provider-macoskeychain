@@ -1,37 +1,15 @@
 # GoReleaser configuration for registry-compatible, GPG-signed releases.
 # Derived from HashiCorp's terraform-provider-scaffolding-framework template.
 # See https://goreleaser.com for documentation.
-#
-# The darwin builds need cgo (the provider calls the macOS Security framework),
-# so releases must run on a macOS host; .github/workflows/release.yml does.
 version: 2
 before:
   hooks:
     - go mod tidy
 builds:
-  # The real provider: macOS, with cgo, linked against the Security framework.
-  # The deployment target matches the oldest macOS that Go supports.
-  - id: darwin
-    env:
-      - CGO_ENABLED=1
-      - MACOSX_DEPLOYMENT_TARGET=13.0
-      - CGO_CFLAGS=-O2 -g -mmacosx-version-min=13.0
-      - CGO_LDFLAGS=-mmacosx-version-min=13.0
-    mod_timestamp: '{{ .CommitTimestamp }}'
-    flags:
-      - -trimpath
-    ldflags:
-      - '-s -w -X main.version={{.Version}}'
-    goos:
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-    binary: '{{ .ProjectName }}_v{{ .Version }}'
-  # Every other platform gets a build whose ephemeral resources fail with a
-  # clear error, so that `init` and `validate` work in mixed teams and CI.
-  - id: other
-    env:
+  # The provider is pure Go: on macOS it runs /usr/bin/security, and on every
+  # other platform its ephemeral resources fail with a clear error, so that
+  # `init` and `validate` work in mixed teams and CI.
+  - env:
       - CGO_ENABLED=0
     mod_timestamp: '{{ .CommitTimestamp }}'
     flags:
@@ -39,6 +17,7 @@ builds:
     ldflags:
       - '-s -w -X main.version={{.Version}}'
     goos:
+      - darwin
       - freebsd
       - linux
       - windows
@@ -48,6 +27,10 @@ builds:
       - arm
       - arm64
     ignore:
+      - goos: darwin
+        goarch: '386'
+      - goos: darwin
+        goarch: arm
       - goos: windows
         goarch: arm
     binary: '{{ .ProjectName }}_v{{ .Version }}'
