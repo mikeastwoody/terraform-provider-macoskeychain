@@ -42,6 +42,7 @@ func TestAccInternetPasswordEphemeralResource(t *testing.T) {
   account  = "alice"
   keychain = %q
 }`, kc.Path, "ephemeral.macoskeychain_internet_password.test.password"),
+				ExpectNonEmptyPlan: cliIsOpenTofu111(),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue("echo.test", tfjsonpath.New("data"), knownvalue.StringExact(secret)),
 				},
@@ -69,6 +70,7 @@ func TestAccInternetPasswordEphemeralResourceNoLeak(t *testing.T) {
   account  = "alice"
   keychain = %q
 }`, kc.Path, "length(ephemeral.macoskeychain_internet_password.test.password)"),
+				ExpectNonEmptyPlan: cliIsOpenTofu111(),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{expectAbsentFromPlan(secret)},
 				},

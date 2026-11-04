@@ -8,8 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -25,6 +29,17 @@ import (
 var ephemeralVersionChecks = []tfversion.TerraformVersionCheck{
 	tfversion.SkipBelow(tfversion.Version1_10_0),
 }
+
+// cliIsOpenTofu111 reports whether TF_ACC_TERRAFORM_PATH is OpenTofu 1.11,
+// which lists every ephemeral resource in the plan with the action "open"
+// (OpenTofu 1.12 stopped storing them in the plan, opentofu#3897).
+// terraform-plugin-testing counts that entry as a change, so there a step
+// that applies a configuration with an ephemeral resource never gets an empty
+// plan and must set ExpectNonEmptyPlan.
+var cliIsOpenTofu111 = sync.OnceValue(func() bool {
+	out, err := exec.Command(os.Getenv("TF_ACC_TERRAFORM_PATH"), "version").Output()
+	return err == nil && strings.HasPrefix(string(out), "OpenTofu v1.11.")
+})
 
 // TestAccGenericPasswordEphemeralResource reads items created with
 // `security add-generic-password` and no -A or -T option, whose access
@@ -49,6 +64,7 @@ func TestAccGenericPasswordEphemeralResource(t *testing.T) {
   account  = "alice"
   keychain = %q
 }`, kc.Path, "ephemeral.macoskeychain_generic_password.test.password"),
+				ExpectNonEmptyPlan: cliIsOpenTofu111(),
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue("echo.test", tfjsonpath.New("data"), knownvalue.StringExact(secret)),
 				},
@@ -77,6 +93,7 @@ func TestAccGenericPasswordEphemeralResourceNoLeak(t *testing.T) {
   account  = "alice"
   keychain = %q
 }`, kc.Path, "sha256(ephemeral.macoskeychain_generic_password.test.password)"),
+				ExpectNonEmptyPlan: cliIsOpenTofu111(),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply:             []plancheck.PlanCheck{expectAbsentFromPlan(secret)},
 					PostApplyPostRefresh: []plancheck.PlanCheck{expectAbsentFromPlan(secret)},
