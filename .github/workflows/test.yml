@@ -1,0 +1,117 @@
+# Build, lint and test the provider on macOS, where it uses the real Keychain.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Testing only needs permissions to read the repository contents.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, vet and lint
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - run: go mod download
+      - run: go build -v .
+      - run: go vet ./...
+      - name: Build for the other platforms (no cgo)
+        run: |
+          CGO_ENABLED=0 go build ./...
+          GOOS=linux GOARCH=amd64 go build ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+      - name: Run linters
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+
+  # The provider schema is the same on every platform, so the docs check runs
+  # on Linux.
+  generate:
+    name: Generated docs are up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_wrapper: false
+      - run: make generate
+      - name: git diff
+        run: |
+          test -z "$(git status --porcelain)" || {
+            git status --short
+            git diff --compact-summary
+            echo
+            echo "Unexpected difference in directories after code generation. Run 'make generate' command and commit."
+            exit 1
+          }
+
+  test:
+    name: 'Tests: ${{ matrix.cli }} ${{ matrix.version }}'
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ephemeral resources need OpenTofu 1.11 or Terraform 1.10.
+          - cli: tofu
+            version: '~1.11.0'
+          - cli: tofu
+            version: latest
+          - cli: terraform
+            version: '1.14.*'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+      - if: matrix.cli == 'tofu'
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ matrix.version }}
+          tofu_wrapper: false
+      - if: matrix.cli == 'terraform'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.version }}
+          terraform_wrapper: false
+      - run: go mod download
+      # Acceptance tests create throwaway keychains in temporary directories.
+      - name: Unit and acceptance tests
+        env:
+          TF_ACC: '1'
+          TF_ACC_PROVIDER_NAMESPACE: hashicorp
+          TF_ACC_PROVIDER_HOST: ${{ matrix.cli == 'tofu' && 'registry.opentofu.org' || 'registry.terraform.io' }}
+          CLI: ${{ matrix.cli }}
+        run: |
+          TF_ACC_TERRAFORM_PATH="$(command -v "$CLI")"
+          export TF_ACC_TERRAFORM_PATH
+          go test -v -cover -timeout 15m ./...
+      - name: Tests of the build without cgo
+        run: CGO_ENABLED=0 go test -v ./internal/keychain/
+      - name: Prove that no secret reaches the plan or the state
+        env:
+          TOFU: ${{ matrix.cli }}
+        run: scripts/prove-no-secret-in-state.sh
