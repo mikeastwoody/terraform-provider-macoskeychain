@@ -84,4 +84,59 @@ a logged-in desktop session, or create it again with `security`.
 A locked keychain needs its password. In a desktop session macOS asks for it;
 in an SSH session, unlock the keychain first with `security unlock-keychain`.
 
+## Common surprises
+
+### Migrating a write-only argument plans an update with nothing changed
+
+**Symptom.** A write-only argument used to receive a variable that was
+`ephemeral` but not `sensitive`. Once it receives `password` instead, `tofu plan`
+proposes an update for every resource that takes it, with no attribute that
+differs between `before` and `after`. In `tofu show -json`, measured on
+`secret_data_wo` of `google_secret_manager_secret_version`, only the sensitivity
+changes:
+
+```text
+before migrating  actions=[no-op]   after_sensitive={secret_data:true}
+after migrating   actions=[update]  after_sensitive={secret_data:true, secret_data_wo:true}
+```
+
+**Cause.** `password` is sensitive, so the argument now receives a marked value
+that the state does not record as marked, and OpenTofu plans that difference as
+an update. A value passed only to a `provider` block does not do this, because
+provider blocks have no state.
+
+**Way out.** Drop the mark at that argument with `nonsensitive()`, and the plan
+goes back to no changes:
+
+```terraform
+resource "google_secret_manager_secret_version" "database" {
+  secret                 = google_secret_manager_secret.database.id
+  secret_data_wo         = nonsensitive(ephemeral.macoskeychain_generic_password.database.password)
+  secret_data_wo_version = 1
+}
+```
+
+The value stays ephemeral, so it still reaches neither the plan nor the state,
+and `scripts/prove-no-secret-in-state.sh` checks that it arrives intact after an
+apply. `nonsensitive()` removes only what hides a value in CLI output, so use it
+on write-only arguments and nowhere else. `password` itself stays sensitive.
+
+### `tofu test` without `mock_provider` reads the real Keychain
+
+**Symptom.** A test run that plans a configuration with these ephemeral
+resources opens them for real, unless the file mocks the provider. Measured with
+a keychain path that does not exist: without a mock, one read and the error
+`Keychain file not found`; with a mock, no reads.
+
+**Way out.** Put this in every test file whose runs use such a configuration:
+
+```hcl
+mock_provider "macoskeychain" {}
+```
+
+A file whose runs all test modules that do not use this provider
+(`module { source = … }` in every run) cannot have it: there `mock_provider` fails
+with `Missing required provider`. Such a file stays off the Keychain only while
+every one of its runs has a `module` block, and nothing enforces that.
+
 {{ .SchemaMarkdown | trimspace }}
