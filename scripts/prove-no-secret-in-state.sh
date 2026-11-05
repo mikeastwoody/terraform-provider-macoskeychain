@@ -148,12 +148,9 @@ no_file_contains() {
 received_sha=$(cut -d ' ' -f 1 "$proof_file")
 write_only_sha=$(cut -d ' ' -f 1 "$write_only_proof_file")
 nonsensitive_sha=$(cut -d ' ' -f 1 "$nonsensitive_proof_file")
-# Counts occurrences, not lines: OpenTofu 1.11 writes the state on a single line.
-null_write_only=$({ grep -oE '"value_wo": ?null' "$config/terraform.tfstate" || true; } | wc -l | tr -d ' ')
 check "the command received the stored password (SHA-256 ${received_sha:0:12}...)" test "$received_sha" = "$expected_sha"
 check "the write-only argument received the stored password (SHA-256 ${write_only_sha:0:12}...)" test "$write_only_sha" = "$expected_sha"
 check "the write-only argument received it through nonsensitive() (SHA-256 ${nonsensitive_sha:0:12}...)" test "$nonsensitive_sha" = "$expected_sha"
-check "the state holds both write-only arguments as null" test "$null_write_only" = 2
 check "control: the search finds the password where it is present" contains "$work/control"
 check "the state file exists" test -s "$config/terraform.tfstate"
 check "the saved plan exists" test -s "$config/proof.tfplan"

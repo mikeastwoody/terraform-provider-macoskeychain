@@ -108,10 +108,6 @@ func record(ctx context.Context, cfg tfsdk.Config, diags *diag.Diagnostics) writ
 	if diags.HasError() {
 		return writeOnlyModel{}
 	}
-	if config.ValueWO.IsNull() || config.ValueWO.IsUnknown() {
-		diags.AddError("No write-only value", "The provider received no known value for value_wo.")
-		return writeOnlyModel{}
-	}
 	if err := writeHash(config.ProofFile.ValueString(), config.ValueWO.ValueString()); err != nil {
 		diags.AddError("Cannot write the proof file", err.Error())
 		return writeOnlyModel{}

@@ -1,7 +1,8 @@
-# A runnable configuration that reads a password and hands it to a command and
-# to write-only arguments, used by scripts/prove-no-secret-in-state.sh. Nothing
-# in it needs a network provider: terraform_data and local-exec are built into
-# OpenTofu, and the script builds proofsink from internal/proofsink.
+# A configuration that reads a password and hands it to a command and to
+# write-only arguments. It runs only through scripts/prove-no-secret-in-state.sh:
+# it needs proofsink, a test-only provider in no registry, which the script builds
+# from internal/proofsink and installs with dev_overrides. Nothing in it needs a
+# network: terraform_data and local-exec are built into OpenTofu.
 
 terraform {
   required_version = ">= 1.11.0"
