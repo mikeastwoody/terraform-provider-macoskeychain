@@ -123,6 +123,17 @@ a logged-in desktop session, or create it again with `security`.
 A locked keychain needs its password. In a desktop session macOS asks for it;
 in an SSH session, unlock the keychain first with `security unlock-keychain`.
 
+## Common surprises
+
+Each has its symptom and way out in the
+[documentation](docs/index.md#common-surprises):
+
+- **Migrating a write-only argument from a non-sensitive variable** makes the plan
+  propose updates with no attribute that differs, because `password` is sensitive.
+  `nonsensitive()` at that argument avoids them, and the value stays ephemeral.
+- **`tofu test` without `mock_provider "macoskeychain" {}`** reads the real
+  Keychain.
+
 ## Errors
 
 The provider explains each failure without echoing secret material:
@@ -147,7 +158,7 @@ make build      # go build ./...
 make lint       # golangci-lint
 make test       # unit tests; a fake `security` for every error, throwaway keychains for the rest
 make testacc    # acceptance tests against OpenTofu (TOFU=terraform for Terraform)
-make prove      # a real plan -out and apply that proves no secret is stored
+make prove      # a real plan -out and apply that proves a secret reaches a write-only argument intact and is not stored
 make generate   # format examples/ and regenerate docs/ with tfplugindocs
 ```
 
@@ -176,8 +187,13 @@ provider_installation {
 Pushing a `v*` tag runs GoReleaser. It builds zips for every platform
 (all with `CGO_ENABLED=0`), a `SHA256SUMS` file signed with GPG and the
 registry manifest, and creates a draft GitHub release to review before
-publishing. The workflow needs the `GPG_PRIVATE_KEY` and `PASSPHRASE`
-repository secrets.
+publishing. The workflow runs in the `release` environment, which holds the
+`GPG_PRIVATE_KEY` and `PASSPHRASE` secrets and asks for approval before the job
+starts.
+
+## Security
+
+To report a vulnerability, see [`SECURITY.md`](SECURITY.md).
 
 ## License
 

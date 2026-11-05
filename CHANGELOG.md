@@ -1,3 +1,16 @@
+## 0.1.1 (Unreleased)
+
+NOTES:
+
+* Documentation: a migrated write-only argument can plan updates with no attribute that differs, because `password` is sensitive, and `nonsensitive()` avoids them. `tofu test` without `mock_provider` reads the real Keychain.
+* `SECURITY.md` explains how to report a vulnerability privately.
+
+BUILD:
+
+* The release workflow runs in the `release` environment, the only place that holds the signing key and its passphrase.
+* `scripts/prove-no-secret-in-state.sh` also proves after an apply that the password reaches a write-only argument intact, directly and through `nonsensitive()`, using a test-only provider that is never released. It runs in CI with its throwaway keychain.
+* Bump `github.com/hashicorp/terraform-json` from 0.27.2 to 0.29.0.
+
 ## 0.1.0 (November 4, 2026)
 
 FEATURES:
