@@ -7,8 +7,9 @@ default: fmt lint install generate
 build:
 	go build -v ./...
 
+# Only the provider: internal/proofsink is a test helper of the proof script.
 install: build
-	go install -v ./...
+	go install -v .
 
 lint:
 	golangci-lint run
@@ -31,7 +32,8 @@ testacc:
 	TF_ACC_PROVIDER_HOST=registry.opentofu.org \
 	go test -v -cover -timeout 120m ./...
 
-# A real plan -out and apply that proves no secret reaches the plan or state.
+# A real plan -out and apply that proves a secret reaches a write-only argument
+# intact and reaches neither the plan nor the state.
 prove:
 	TOFU=$(TOFU) scripts/prove-no-secret-in-state.sh
 

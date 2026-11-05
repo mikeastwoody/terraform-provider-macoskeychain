@@ -3,14 +3,16 @@
 # SPDX-License-Identifier: MPL-2.0
 #
 # Proves with a real OpenTofu (or Terraform) run that a password read by this
-# provider reaches the configuration that uses it, and is written to neither
-# a saved plan nor the state.
+# provider reaches, byte for byte, a command and a write-only argument after an
+# apply, and is written to neither a saved plan nor the state.
 #
-# It builds the provider, creates a throwaway keychain in a temporary
-# directory, stores a random password in it, runs `plan -out` and `apply` on
-# examples/no-secret-in-state, searches every file the run wrote for the
-# password, and deletes the keychain. It never reads or writes the login
-# keychain, and it never prints the password.
+# It builds the provider and proofsink (a test-only provider with a write-only
+# argument), creates a throwaway keychain in a temporary directory, stores a
+# random password in it, runs `plan -out` and `apply` on
+# examples/no-secret-in-state, compares the hashes of what each consumer
+# received, searches every file the run wrote for the password, and deletes the
+# keychain. It never reads or writes the login keychain, and it never prints the
+# password.
 #
 # Usage: scripts/prove-no-secret-in-state.sh   (TOFU=/path/to/tofu to choose the binary)
 
@@ -41,9 +43,10 @@ security_stdin() {
 
 echo "== OpenTofu: $("$tofu" version | head -n 1)"
 
-echo "== Building the provider"
+echo "== Building the provider and proofsink"
 mkdir -p "$work/plugins"
 (cd "$repo" && go build -o "$work/plugins/terraform-provider-macoskeychain" .)
+(cd "$repo" && go build -o "$work/plugins/terraform-provider-proofsink" ./internal/proofsink)
 
 echo "== Creating a throwaway keychain in $work"
 keychain_password=$(random_hex 32)
@@ -70,6 +73,8 @@ provider_installation {
   dev_overrides {
     "registry.opentofu.org/mikeastwoody/macoskeychain"  = "$work/plugins"
     "registry.terraform.io/mikeastwoody/macoskeychain" = "$work/plugins"
+    "registry.opentofu.org/mikeastwoody/proofsink"     = "$work/plugins"
+    "registry.terraform.io/mikeastwoody/proofsink"     = "$work/plugins"
   }
   direct {}
 }
@@ -80,7 +85,12 @@ export TF_IN_AUTOMATION=1
 config="$work/config"
 cp -R "$repo/examples/no-secret-in-state" "$config"
 proof_file="$work/proof.sha256"
-vars=(-var "service=$service" -var "account=$account" -var "keychain=$keychain" -var "proof_file=$proof_file")
+write_only_proof_file="$work/write-only.sha256"
+nonsensitive_proof_file="$work/nonsensitive.sha256"
+vars=(
+	-var "service=$service" -var "account=$account" -var "keychain=$keychain" -var "proof_file=$proof_file"
+	-var "write_only_proof_file=$write_only_proof_file" -var "nonsensitive_proof_file=$nonsensitive_proof_file"
+)
 
 # run_tofu LOG ARGS... runs the CLI in the configuration directory with its
 # output in LOG, which the final search also covers, and stops on failure.
@@ -100,7 +110,7 @@ grep -E '^(Plan:|  # |OpenTofu will perform|Terraform will perform)' "$work/plan
 
 echo "== $tofu apply proof.tfplan"
 run_tofu "$work/apply.log" apply -input=false -no-color proof.tfplan
-grep -E '^(Apply complete|terraform_data)' "$work/apply.log" || true
+grep -E '^(Apply complete|terraform_data|proofsink_write_only)' "$work/apply.log" || true
 
 # Everything to search goes to a file first: `! producer | grep -q` could
 # pass by mistake under pipefail when grep finds a match and exits early.
@@ -136,7 +146,14 @@ no_file_contains() {
 }
 
 received_sha=$(cut -d ' ' -f 1 "$proof_file")
+write_only_sha=$(cut -d ' ' -f 1 "$write_only_proof_file")
+nonsensitive_sha=$(cut -d ' ' -f 1 "$nonsensitive_proof_file")
+# Counts occurrences, not lines: OpenTofu 1.11 writes the state on a single line.
+null_write_only=$({ grep -oE '"value_wo": ?null' "$config/terraform.tfstate" || true; } | wc -l | tr -d ' ')
 check "the command received the stored password (SHA-256 ${received_sha:0:12}...)" test "$received_sha" = "$expected_sha"
+check "the write-only argument received the stored password (SHA-256 ${write_only_sha:0:12}...)" test "$write_only_sha" = "$expected_sha"
+check "the write-only argument received it through nonsensitive() (SHA-256 ${nonsensitive_sha:0:12}...)" test "$nonsensitive_sha" = "$expected_sha"
+check "the state holds both write-only arguments as null" test "$null_write_only" = 2
 check "control: the search finds the password where it is present" contains "$work/control"
 check "the state file exists" test -s "$config/terraform.tfstate"
 check "the saved plan exists" test -s "$config/proof.tfplan"
@@ -150,4 +167,4 @@ if [[ $failed -ne 0 ]]; then
 	echo "== FAILED" >&2
 	exit 1
 fi
-echo "== OK: the password reached the command and was written to neither the plan nor the state"
+echo "== OK: the password reached the command and the write-only arguments intact, and was written to neither the plan nor the state"
