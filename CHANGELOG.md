@@ -1,4 +1,4 @@
-## 0.1.1 (Unreleased)
+## 0.1.1 (November 10, 2026)
 
 NOTES:
 
