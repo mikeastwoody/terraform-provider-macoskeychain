@@ -124,7 +124,7 @@ jobs:
           TF_ACC_TERRAFORM_PATH="$(command -v "$CLI")"
           export TF_ACC_TERRAFORM_PATH
           go test -v -cover -timeout 15m ./...
-      - name: Prove that no secret reaches the plan or the state
+      - name: Prove that the secret arrives intact and reaches neither the plan nor the state
         env:
           TOFU: ${{ matrix.cli }}
         run: scripts/prove-no-secret-in-state.sh

@@ -16,6 +16,9 @@ permissions:
 
 jobs:
   goreleaser:
+    # The signing key and its passphrase exist only as secrets of this
+    # environment, which also asks for approval before the job starts.
+    environment: release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
